@@ -24,6 +24,12 @@
 #include <errno.h>
 #include <sys/epoll.h>
 
+#if defined(__has_feature)
+#if __has_feature(memory_sanitizer)
+#include <sanitizer/msan_interface.h>
+#endif
+#endif
+
 int uv__epoll_init(uv_loop_t* loop) {
   int fd;
   fd = epoll_create1(O_CLOEXEC);
@@ -115,6 +121,11 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
   int no_epoll_pwait;
   int no_epoll_wait;
   struct epoll_event events[1024];
+#if defined(__has_feature)
+#if __has_feature(memory_sanitizer)
+  __msan_unpoison(events, 1024);
+#endif
+#endif
   struct epoll_event* pe;
   struct epoll_event e;
   int real_timeout;
