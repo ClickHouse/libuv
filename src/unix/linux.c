@@ -52,6 +52,12 @@
 #include <time.h>
 #include <unistd.h>
 
+#if defined(__has_feature)
+#if __has_feature(memory_sanitizer)
+#include <sanitizer/msan_interface.h>
+#endif
+#endif
+
 #ifndef __NR_io_uring_setup
 # define __NR_io_uring_setup 425
 #endif
@@ -1258,6 +1264,11 @@ static void uv__epoll_ctl_flush(int epollfd,
 void uv__io_poll(uv_loop_t* loop, int timeout) {
   uv__loop_internal_fields_t* lfields;
   struct epoll_event events[1024];
+#if defined(__has_feature)
+#if __has_feature(memory_sanitizer)
+  __msan_unpoison(events, 1024);
+#endif
+#endif
   struct epoll_event prep[256];
   struct uv__invalidate inv;
   struct epoll_event* pe;
