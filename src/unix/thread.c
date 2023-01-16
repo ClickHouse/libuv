@@ -383,7 +383,7 @@ int uv_thread_getaffinity(uv_thread_t* tid,
 #endif /* defined(__linux__) || defined(UV_BSD_H) */
 
 int uv_thread_getcpu(void) {
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__) || defined(__FreeBSD__) && supports_sched_getcpu
   int cpu;
 
   cpu = sched_getcpu();
@@ -625,21 +625,27 @@ int uv_sem_trywait(uv_sem_t* sem) {
 
 static uv_once_t glibc_version_check_once = UV_ONCE_INIT;
 static int platform_needs_custom_semaphore = 0;
+static int supports_sched_getcpu = 0;
 
 static void glibc_version_check(void) {
   const char* version = gnu_get_libc_version();
   platform_needs_custom_semaphore =
       version[0] == '2' && version[1] == '.' &&
       atoi(version + 2) < 21;
+  supports_sched_getcpu =
+      version[0] == '2' && version[1] == '.' &&
+      atoi(version + 2) >= 6;
 }
 
 #elif defined(__MVS__)
 
 #define platform_needs_custom_semaphore 1
+#define supports_sched_getcpu = 0;
 
 #else /* !defined(__GLIBC__) && !defined(__MVS__) */
 
 #define platform_needs_custom_semaphore 0
+#define supports_sched_getcpu = 0;
 
 #endif
 
