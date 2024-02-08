@@ -83,7 +83,7 @@ static void read_speeds(unsigned int numcpus, uv_cpu_info_t* ci);
 static uint64_t read_cpufreq(unsigned int cpunum);
 
 int uv__platform_loop_init(uv_loop_t* loop) {
-  
+
   loop->inotify_fd = -1;
   loop->inotify_watchers = NULL;
 
@@ -119,7 +119,7 @@ void uv__platform_loop_delete(uv_loop_t* loop) {
 
 
 uint64_t uv__hrtime(uv_clocktype_t type) {
-  static clock_t fast_clock_id = -1;
+  static _Atomic clock_t fast_clock_id = -1;
   struct timespec t;
   clock_t clock_id;
 
