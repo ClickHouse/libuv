@@ -32,6 +32,19 @@
 #include <fcntl.h>  /* O_CLOEXEC and O_NONBLOCK, if supported. */
 #include <stdio.h>
 #include <errno.h>
+
+/* ClickHouse: with its musl, the file descriptors visible to the program are a pseudorandom
+ * encoding of the kernel descriptors (see contrib/musl/src/internal/fdmap.h in ClickHouse).
+ * The table of watchers is indexed by the kernel descriptor, which is small, and the kernel
+ * reads the descriptors of io_uring submission entries directly. uv__kernel_fd returns -1 if
+ * the descriptor is not open. */
+#if defined(USE_MUSL)
+int __musl_fd_to_kernel(int fd);
+int __musl_fd_from_kernel(int kernel_fd);
+#define uv__kernel_fd(fd) __musl_fd_to_kernel(fd)
+#else
+#define uv__kernel_fd(fd) (fd)
+#endif
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>

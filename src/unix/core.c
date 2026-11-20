@@ -867,6 +867,22 @@ static unsigned int next_power_of_two(unsigned int val) {
   return val;
 }
 
+/* The index of the watcher in loop->watchers, or -1. The descriptor may be already closed:
+ * then the index is found by a search. */
+static int uv__io_slot(uv_loop_t* loop, uv__io_t* w) {
+  int slot;
+  unsigned int i;
+
+  slot = uv__kernel_fd(w->fd);
+  if (slot >= 0 && (unsigned) slot < loop->nwatchers && loop->watchers[slot] == w)
+    return slot;
+  for (i = 0; i < loop->nwatchers; i++)
+    if (loop->watchers[i] == w)
+      return i;
+  return -1;
+}
+
+
 static int maybe_resize(uv_loop_t* loop, unsigned int len) {
   uv__io_t** watchers;
   void* fake_watcher_list;
@@ -952,6 +968,7 @@ void uv__io_init(uv__io_t* w, uv__io_cb_t cb, int fd) {
 
 int uv__io_start(uv_loop_t* loop, uv__io_t* w, unsigned int events) {
   int err;
+  int slot;
 
   assert(uv__io_cb_get(w) >= UV__AHAFS_EVENT);
   assert(uv__io_cb_get(w) <= UV__UDP_IO);
@@ -960,8 +977,12 @@ int uv__io_start(uv_loop_t* loop, uv__io_t* w, unsigned int events) {
   assert(w->fd >= 0);
   assert(w->fd < INT_MAX);
 
+  slot = uv__kernel_fd(w->fd);
+  if (slot < 0)
+    return UV_EBADF;
+
   w->pevents |= events;
-  err = maybe_resize(loop, w->fd + 1);
+  err = maybe_resize(loop, slot + 1);
   if (err)
     return err;
 
@@ -977,8 +998,8 @@ int uv__io_start(uv_loop_t* loop, uv__io_t* w, unsigned int events) {
   if (uv__queue_empty(&w->watcher_queue))
     uv__queue_insert_tail(&loop->watcher_queue, &w->watcher_queue);
 
-  if (loop->watchers[w->fd] == NULL) {
-    loop->watchers[w->fd] = w;
+  if (loop->watchers[slot] == NULL) {
+    loop->watchers[slot] = w;
     loop->nfds++;
   }
 
@@ -1003,6 +1024,8 @@ int uv__io_init_start(uv_loop_t* loop,
 
 
 void uv__io_stop(uv_loop_t* loop, uv__io_t* w, unsigned int events) {
+  int slot;
+
   assert(0 == (events & ~(POLLIN | POLLOUT | UV__POLLRDHUP | UV__POLLPRI)));
   assert(0 != events);
 
@@ -1012,7 +1035,7 @@ void uv__io_stop(uv_loop_t* loop, uv__io_t* w, unsigned int events) {
   assert(w->fd >= 0);
 
   /* Happens when uv__io_stop() is called on a handle that was never started. */
-  if ((unsigned) w->fd >= loop->nwatchers)
+  if (loop->nwatchers == 0)
     return;
 
   w->pevents &= ~events;
@@ -1022,9 +1045,10 @@ void uv__io_stop(uv_loop_t* loop, uv__io_t* w, unsigned int events) {
     uv__queue_init(&w->watcher_queue);
     w->events = 0;
 
-    if (w == loop->watchers[w->fd]) {
+    slot = uv__io_slot(loop, w);
+    if (slot >= 0) {
       assert(loop->nfds > 0);
-      loop->watchers[w->fd] = NULL;
+      loop->watchers[slot] = NULL;
       loop->nfds--;
     }
     return;
@@ -1104,7 +1128,8 @@ void uv__io_poll_check(uv_loop_t* loop, sigset_t* pset) {
 }
 
 int uv__fd_exists(uv_loop_t* loop, int fd) {
-  return (unsigned) fd < loop->nwatchers && loop->watchers[fd] != NULL;
+  int slot = uv__kernel_fd(fd);
+  return slot >= 0 && (unsigned) slot < loop->nwatchers && loop->watchers[slot] != NULL;
 }
 
 
