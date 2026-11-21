@@ -914,7 +914,7 @@ int uv__iou_fs_close(uv_loop_t* loop, uv_fs_t* req) {
   if (sqe == NULL)
     return 0;
 
-  sqe->fd = req->file;
+  sqe->fd = uv__kernel_fd(req->file);
   sqe->opcode = UV__IORING_OP_CLOSE;
 
   uv__iou_submit(iou);
@@ -935,7 +935,7 @@ int uv__iou_fs_ftruncate(uv_loop_t* loop, uv_fs_t* req) {
   if (sqe == NULL)
     return 0;
 
-  sqe->fd = req->file;
+  sqe->fd = uv__kernel_fd(req->file);
   sqe->off = req->off;
   sqe->opcode = UV__IORING_OP_FTRUNCATE;
   uv__iou_submit(iou);
@@ -958,7 +958,7 @@ int uv__iou_fs_fsync_or_fdatasync(uv_loop_t* loop,
   /* Little known fact: setting seq->off and seq->len turns
    * it into an asynchronous sync_file_range() operation.
    */
-  sqe->fd = req->file;
+  sqe->fd = uv__kernel_fd(req->file);
   sqe->fsync_flags = fsync_flags;
   sqe->opcode = UV__IORING_OP_FSYNC;
 
@@ -1124,7 +1124,7 @@ int uv__iou_fs_read_or_write(uv_loop_t* loop,
     return 0;
 
   sqe->addr = (uintptr_t) req->bufs;
-  sqe->fd = req->file;
+  sqe->fd = uv__kernel_fd(req->file);
   sqe->len = req->nbufs;
   sqe->off = req->off < 0 ? -1 : req->off;
   sqe->opcode = is_read ? UV__IORING_OP_READV : UV__IORING_OP_WRITEV;
@@ -1165,7 +1165,7 @@ int uv__iou_fs_statx(uv_loop_t* loop,
 
   if (is_fstat) {
     sqe->addr = (uintptr_t) "";
-    sqe->fd = req->file;
+    sqe->fd = uv__kernel_fd(req->file);
     sqe->statx_flags |= 0x1000; /* AT_EMPTY_PATH */
   }
 
@@ -1279,6 +1279,13 @@ static void uv__poll_io_uring(uv_loop_t* loop, struct uv__iou* iou) {
       case UV_FS_STAT:
         uv__iou_fs_statx_post(req);
         break;
+#if defined(USE_MUSL)
+      case UV_FS_OPEN:
+        /* The kernel returns a kernel descriptor, see uv__kernel_fd. */
+        if (req->result >= 0)
+          req->result = __musl_fd_from_kernel(req->result);
+        break;
+#endif
       default:  /* Squelch -Wswitch warnings. */
         break;
     }
@@ -1342,9 +1349,9 @@ static void uv__epoll_ctl_prep(int epollfd,
 
   memset(sqe, 0, sizeof(*sqe));
   sqe->addr = (uintptr_t) pe;
-  sqe->fd = epollfd;
+  sqe->fd = uv__kernel_fd(epollfd);
   sqe->len = op;
-  sqe->off = fd;
+  sqe->off = uv__kernel_fd(fd);
   sqe->opcode = UV__IORING_OP_EPOLL_CTL;
   sqe->user_data = op | slot << 2 | (int64_t) fd << 32;
 
@@ -1435,6 +1442,7 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
   struct epoll_event e;
   struct uv__iou* ctl;
   struct uv__iou* iou;
+  int slot;
   int real_timeout;
   struct uv__queue* q;
   uv__io_t* w;
@@ -1579,9 +1587,12 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
       }
 
       assert(fd >= 0);
-      assert((unsigned) fd < loop->nwatchers);
 
-      w = loop->watchers[fd];
+      /* The descriptor may be closed or reused by another watcher, see uv__kernel_fd. */
+      slot = uv__kernel_fd(fd);
+      w = slot >= 0 && (unsigned) slot < loop->nwatchers ? loop->watchers[slot] : NULL;
+      if (w != NULL && w->fd != fd)
+        w = NULL;
 
       if (w == NULL) {
         /* File descriptor that we've stopped watching, disarm it.

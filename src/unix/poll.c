@@ -141,7 +141,7 @@ int uv_poll_start(uv_poll_t* handle, int pevents, uv_poll_cb poll_cb) {
   w = &handle->io_watcher;
 
   if (uv__fd_exists(handle->loop, w->fd))
-    if (watchers[w->fd] != w)
+    if (watchers[uv__kernel_fd(w->fd)] != w)
       return UV_EEXIST;
 
   uv__poll_stop(handle);
